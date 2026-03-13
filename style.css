@@ -268,11 +268,11 @@ input, textarea {
 @keyframes node-enter {
   from {
     opacity: 0;
-    transform: var(--pos) scale(0);
+    scale: 0;
   }
   to {
     opacity: 1;
-    transform: var(--pos) scale(1);
+    scale: 1;
   }
 }
 
@@ -284,7 +284,7 @@ input, textarea {
 @keyframes node-exit {
   to {
     opacity: 0;
-    transform: var(--pos) scale(0);
+    scale: 0;
   }
 }
 

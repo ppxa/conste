@@ -449,7 +449,10 @@
       });
       this._render();
       const el = this.$nodes.querySelector(`[data-id="${n.id}"]`);
-      if (el) el.classList.add('entering');
+      if (el) {
+        el.classList.add('entering');
+        el.addEventListener('animationend', () => el.classList.remove('entering'), { once: true });
+      }
       setTimeout(() => this._openEditor(n.id), 320);
       return n;
     }
