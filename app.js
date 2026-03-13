@@ -164,6 +164,7 @@
       this.touchInfo = null;    // { x, y, time, nodeEl, moved }
       this.overlapTarget = null;
       this.editorNodeId = null;
+      this._lastTouchTime = 0;  // guard against synthetic mouse events
 
       // DOM
       this.$container = document.getElementById('canvas-container');
@@ -211,10 +212,17 @@
       c.addEventListener('touchmove', e => this._onTouchMove(e), { passive: false });
       c.addEventListener('touchend', e => this._onTouchEnd(e));
       c.addEventListener('touchcancel', e => this._onTouchEnd(e));
-      // Mouse
-      c.addEventListener('mousedown', e => this._onPointerDown(e.clientX, e.clientY, e.target, e));
-      window.addEventListener('mousemove', e => { if (this.touchInfo) this._onPointerMove(e.clientX, e.clientY); });
-      window.addEventListener('mouseup', e => { if (this.touchInfo) this._onPointerUp(); });
+      // Mouse (with touch guard to prevent ghost clicks on iOS)
+      c.addEventListener('mousedown', e => {
+        if (Date.now() - this._lastTouchTime < 500) return;
+        this._onPointerDown(e.clientX, e.clientY, e.target, e);
+      });
+      window.addEventListener('mousemove', e => {
+        if (this.touchInfo && Date.now() - this._lastTouchTime > 500) this._onPointerMove(e.clientX, e.clientY);
+      });
+      window.addEventListener('mouseup', e => {
+        if (this.touchInfo && Date.now() - this._lastTouchTime > 500) this._onPointerUp();
+      });
       c.addEventListener('wheel', e => this._onWheel(e), { passive: false });
       // UI buttons
       document.getElementById('fab-add').addEventListener('click', () => this._createAtCenter());
@@ -247,6 +255,7 @@
       }
       if (e.touches.length !== 1) return;
       e.preventDefault();
+      this._lastTouchTime = Date.now();
       const t = e.touches[0];
       this._onPointerDown(t.clientX, t.clientY, t.target, e);
     }
@@ -507,6 +516,8 @@
     _closeEditor() {
       this._saveEditor();
       this.editorNodeId = null;
+      // Dismiss iOS keyboard and release focus
+      if (document.activeElement) document.activeElement.blur();
       this.$editorSheet.classList.remove('open');
       this.$editorOverlay.classList.remove('open');
       this._render();
@@ -597,6 +608,9 @@
           el.dataset.id = n.id;
           el.innerHTML = `<div class="node-star"></div><div class="node-title"></div><div class="node-preview"></div><div class="node-link-badge"></div>`;
           this.$nodes.appendChild(el);
+        } else {
+          // Clean up stale animation classes
+          el.classList.remove('entering', 'snap-back');
         }
         this._updateNodeEl(n, el);
       }
