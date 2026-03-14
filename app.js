@@ -453,6 +453,12 @@
       this.$searchInput = document.getElementById('search-input');
       this.$searchClear = document.getElementById('search-clear');
       this.$searchResults = document.getElementById('search-results');
+      this.$reminderToggle = document.getElementById('editor-reminder-toggle');
+      this.$reminderLabel = document.getElementById('editor-reminder-label');
+      this.$reminderPicker = document.getElementById('editor-reminder-picker');
+      this.$reminderDate = document.getElementById('editor-reminder-date');
+      this.$reminderTime = document.getElementById('editor-reminder-time');
+      this.$reminderClear = document.getElementById('editor-reminder-clear');
       this.$editorPreview = document.getElementById('editor-preview');
       this.$editorPreviewToggle = document.getElementById('editor-preview-toggle');
       this.$toast = document.getElementById('toast');
@@ -467,6 +473,7 @@
       this._checkOnboarding();
 
       this._starfield = new StarField(document.getElementById('starfield'));
+      this._startReminderCheck();
     }
 
     // --- SVG Defs ---
@@ -518,6 +525,10 @@
       this.$editorTitle.addEventListener('input', () => this._saveEditor());
       this.$editorContent.addEventListener('input', () => this._saveEditor());
       this.$editorPreviewToggle.addEventListener('click', () => this._togglePreview());
+      this.$reminderToggle.addEventListener('click', () => this._toggleReminderPicker());
+      this.$reminderDate.addEventListener('change', () => this._saveReminder());
+      this.$reminderTime.addEventListener('change', () => this._saveReminder());
+      this.$reminderClear.addEventListener('click', () => this._clearReminder());
       this.$editorTagInput.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ',') {
           e.preventDefault();
@@ -862,6 +873,7 @@
       this.$editorMeta.textContent = `Created ${d.toLocaleDateString('ja-JP')} ${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`;
 
       this._renderEditorTags();
+      this._setupReminderEditor();
       this.$editorSheet.classList.add('open');
       this.$editorOverlay.classList.add('open');
       setTimeout(() => { if (!n.title) this.$editorTitle.focus(); }, 380);
@@ -876,6 +888,7 @@
       this.$editorPreview.classList.remove('open');
       this.$editorPreviewToggle.classList.remove('active');
       this.$editorContent.style.display = '';
+      this.$reminderPicker.classList.add('reminder-picker-hidden');
       this._render();
     }
 
@@ -886,6 +899,93 @@
       if (on) {
         this.$editorPreview.innerHTML = renderMD(this.$editorContent.value);
       }
+    }
+
+    // --- Reminder ---
+    _toggleReminderPicker() {
+      const hidden = this.$reminderPicker.classList.toggle('reminder-picker-hidden');
+      if (!hidden && this.editorNodeId) {
+        const n = this.store.getNode(this.editorNodeId);
+        if (n && n.reminder) {
+          const d = new Date(n.reminder);
+          this.$reminderDate.value = d.toISOString().slice(0, 10);
+          this.$reminderTime.value = d.toTimeString().slice(0, 5);
+        } else {
+          // Default: 1 hour from now
+          const d = new Date(Date.now() + 3600000);
+          this.$reminderDate.value = d.toISOString().slice(0, 10);
+          this.$reminderTime.value = d.toTimeString().slice(0, 5);
+        }
+      }
+    }
+
+    _saveReminder() {
+      if (!this.editorNodeId) return;
+      const dateVal = this.$reminderDate.value;
+      const timeVal = this.$reminderTime.value;
+      if (!dateVal || !timeVal) return;
+      const ts = new Date(`${dateVal}T${timeVal}`).getTime();
+      if (isNaN(ts)) return;
+      this.store.updateNode(this.editorNodeId, { reminder: ts });
+      this.$reminderLabel.textContent = this._formatReminder(ts);
+      this.$reminderToggle.classList.add('reminder-active');
+      this._render();
+    }
+
+    _clearReminder() {
+      if (!this.editorNodeId) return;
+      const n = this.store.getNode(this.editorNodeId);
+      if (n) { n.reminder = null; this.store.save(); }
+      this.$reminderLabel.textContent = 'Add reminder';
+      this.$reminderToggle.classList.remove('reminder-active');
+      this.$reminderPicker.classList.add('reminder-picker-hidden');
+      this._render();
+    }
+
+    _setupReminderEditor() {
+      if (!this.editorNodeId) return;
+      const n = this.store.getNode(this.editorNodeId);
+      if (n && n.reminder) {
+        this.$reminderLabel.textContent = this._formatReminder(n.reminder);
+        this.$reminderToggle.classList.add('reminder-active');
+        const d = new Date(n.reminder);
+        this.$reminderDate.value = d.toISOString().slice(0, 10);
+        this.$reminderTime.value = d.toTimeString().slice(0, 5);
+      } else {
+        this.$reminderLabel.textContent = 'Add reminder';
+        this.$reminderToggle.classList.remove('reminder-active');
+      }
+      this.$reminderPicker.classList.add('reminder-picker-hidden');
+    }
+
+    _checkReminders() {
+      const now = Date.now();
+      const overdue = this.store.data.nodes.filter(n => n.reminder && n.reminder <= now);
+      if (!overdue.length) return;
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+      for (const n of overdue) {
+        // Only notify once per reminder (mark as notified)
+        if (n._notified) continue;
+        n._notified = true;
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('Conste Reminder', {
+            body: n.title || 'Untitled note',
+            icon: 'icons/icon.svg',
+          });
+        }
+      }
+      if (overdue.length) {
+        this._showToast(`${overdue.length} reminder${overdue.length > 1 ? 's' : ''} overdue`);
+      }
+      this._render();
+    }
+
+    _startReminderCheck() {
+      this._checkReminders();
+      this._reminderInterval = setInterval(() => this._checkReminders(), 60000);
     }
 
     _saveEditor() {
@@ -1462,7 +1562,7 @@
           el = document.createElement('div');
           el.className = 'node';
           el.dataset.id = n.id;
-          el.innerHTML = `<div class="node-star"></div><div class="node-title"></div><div class="node-preview"></div><div class="node-link-badge"></div>`;
+          el.innerHTML = `<div class="node-star"></div><div class="node-title"></div><div class="node-preview"></div><div class="node-reminder-badge"></div><div class="node-link-badge"></div>`;
           this.$nodes.appendChild(el);
         } else {
           // Clean up stale animation classes
@@ -1495,6 +1595,34 @@
       const badge = el.querySelector('.node-link-badge');
       badge.textContent = lc;
       el.classList.toggle('has-links', lc > 0);
+      // Reminder
+      const rb = el.querySelector('.node-reminder-badge');
+      if (n.reminder) {
+        const now = Date.now();
+        const diff = n.reminder - now;
+        const overdue = diff < 0;
+        const soon = !overdue && diff < 3600000; // within 1 hour
+        el.classList.toggle('reminder-overdue', overdue);
+        el.classList.toggle('reminder-soon', soon);
+        rb.textContent = overdue ? 'Overdue' : this._formatReminder(n.reminder);
+        rb.style.display = '';
+      } else {
+        el.classList.remove('reminder-overdue', 'reminder-soon');
+        rb.style.display = 'none';
+      }
+    }
+
+    _formatReminder(ts) {
+      const d = new Date(ts);
+      const now = new Date();
+      const diff = ts - Date.now();
+      if (diff < 0) return 'Overdue';
+      if (diff < 3600000) return Math.ceil(diff / 60000) + 'm';
+      if (diff < 86400000) return Math.ceil(diff / 3600000) + 'h';
+      if (d.toDateString() === new Date(now.getTime() + 86400000).toDateString()) {
+        return 'Tomorrow ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      }
+      return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
     }
 
     _positionNode(n, el) {

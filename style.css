@@ -468,6 +468,119 @@ input, textarea {
   background: var(--bg-surface-active);
 }
 
+/* --- Editor Reminder --- */
+#editor-reminder {
+  padding: 0 16px 6px;
+}
+
+.reminder-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.reminder-toggle.reminder-active {
+  color: var(--accent-orange);
+  border-color: rgba(251, 146, 60, 0.3);
+}
+
+.reminder-toggle:active {
+  background: var(--bg-surface-active);
+}
+
+.reminder-picker-hidden {
+  display: none !important;
+}
+
+#editor-reminder-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+#editor-reminder-date,
+#editor-reminder-time {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  -webkit-appearance: none;
+  color-scheme: dark;
+}
+
+#editor-reminder-date:focus,
+#editor-reminder-time:focus {
+  border-color: var(--border-glass-active);
+}
+
+.reminder-clear {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.reminder-clear:active {
+  background: var(--bg-surface-active);
+  color: var(--accent-danger);
+}
+
+/* --- Node Reminder Badge --- */
+.node-reminder-badge {
+  display: none;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-top: 4px;
+  color: var(--accent-orange);
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px solid rgba(251, 146, 60, 0.2);
+}
+
+.node.reminder-overdue .node-reminder-badge {
+  color: var(--accent-danger);
+  background: rgba(251, 113, 133, 0.1);
+  border-color: rgba(251, 113, 133, 0.25);
+}
+
+.node.reminder-overdue {
+  animation: reminder-pulse 2s ease-in-out infinite;
+}
+
+@keyframes reminder-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(251, 113, 133, 0); }
+  50% { box-shadow: 0 0 18px rgba(251, 113, 133, 0.25); }
+}
+
+.node.reminder-soon .node-reminder-badge {
+  color: var(--accent-orange);
+}
+
+.node.reminder-soon .node-star {
+  animation: star-urgent 1.5s ease-in-out infinite;
+}
+
+@keyframes star-urgent {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+}
+
 /* --- Editor Tags --- */
 #editor-tags {
   display: flex;
