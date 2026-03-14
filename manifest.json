@@ -1,0 +1,14 @@
+{
+  "name": "Conste",
+  "short_name": "Conste",
+  "description": "Your constellation of ideas",
+  "start_url": "/conste/",
+  "scope": "/conste/",
+  "display": "standalone",
+  "background_color": "#08081a",
+  "theme_color": "#08081a",
+  "orientation": "any",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
