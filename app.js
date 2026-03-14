@@ -77,10 +77,17 @@
       this.stars = [];
       this.shooting = [];
       this.lastShoot = 0;
+      this.vpx = 0;
+      this.vpy = 0;
       this._resize();
       this._generate();
       window.addEventListener('resize', () => { this._resize(); this._generate(); });
       this._loop();
+    }
+    // Called by App when viewport changes
+    setViewport(x, y) {
+      this.vpx = x;
+      this.vpy = y;
     }
     _resize() {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -93,16 +100,30 @@
       this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     _generate() {
-      const count = Math.floor(this.w * this.h / 2500);
+      const count = Math.floor(this.w * this.h / 2000);
       this.stars = [];
+      // 3 depth layers: far (0), mid (1), near (2)
       for (let i = 0; i < count; i++) {
+        const layer = i < count * 0.6 ? 0 : i < count * 0.85 ? 1 : 2;
+        const r = layer === 0 ? Math.random() * 0.8 + 0.2
+                : layer === 1 ? Math.random() * 1.0 + 0.5
+                : Math.random() * 1.5 + 0.8;
+        const a = layer === 0 ? Math.random() * 0.3 + 0.08
+                : layer === 1 ? Math.random() * 0.4 + 0.15
+                : Math.random() * 0.5 + 0.2;
+        // Parallax factor: far stars move less, near stars move more
+        const pf = layer === 0 ? 0.02 : layer === 1 ? 0.05 : 0.1;
         this.stars.push({
-          x: Math.random() * this.w,
-          y: Math.random() * this.h,
-          r: Math.random() * 1.3 + 0.3,
-          a: Math.random() * 0.5 + 0.15,
+          x: Math.random() * this.w * 1.4 - this.w * 0.2,
+          y: Math.random() * this.h * 1.4 - this.h * 0.2,
+          r, a,
           sp: Math.random() * 1.5 + 0.3,
           ph: Math.random() * Math.PI * 2,
+          pf, layer,
+          // Near stars get subtle color tinting
+          color: layer === 2 && Math.random() > 0.6
+            ? COLORS[Math.floor(Math.random() * COLORS.length)]
+            : null,
         });
       }
     }
@@ -111,13 +132,30 @@
       ctx.clearRect(0, 0, this.w, this.h);
       const t = performance.now() / 1000;
 
-      // Stars
+      // Stars with parallax
       for (const s of this.stars) {
         const tw = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
         const alpha = s.a * (0.3 + 0.7 * tw);
+        // Parallax offset from viewport
+        const px = s.x + this.vpx * s.pf;
+        const py = s.y + this.vpy * s.pf;
+        // Wrap around screen edges with margin
+        const wx = ((px % (this.w * 1.4)) + this.w * 1.4) % (this.w * 1.4) - this.w * 0.2;
+        const wy = ((py % (this.h * 1.4)) + this.h * 1.4) % (this.h * 1.4) - this.h * 0.2;
+        if (wx < -10 || wx > this.w + 10 || wy < -10 || wy > this.h + 10) continue;
         ctx.beginPath();
-        ctx.arc(s.x, s.y, s.r, 0, 6.284);
-        ctx.fillStyle = `rgba(190,200,240,${alpha})`;
+        ctx.arc(wx, wy, s.r, 0, 6.284);
+        if (s.color) {
+          ctx.fillStyle = s.color.replace(')', `,${alpha})`).replace('rgb', 'rgba').replace('#', '');
+          // Hex to rgba
+          const hex = s.color;
+          const ri = parseInt(hex.slice(1,3),16);
+          const gi = parseInt(hex.slice(3,5),16);
+          const bi = parseInt(hex.slice(5,7),16);
+          ctx.fillStyle = `rgba(${ri},${gi},${bi},${alpha * 0.6})`;
+        } else {
+          ctx.fillStyle = `rgba(190,200,240,${alpha})`;
+        }
         ctx.fill();
       }
 
@@ -267,7 +305,7 @@
       this._centerViewport();
       this._checkOnboarding();
 
-      new StarField(document.getElementById('starfield'));
+      this._starfield = new StarField(document.getElementById('starfield'));
     }
 
     // --- SVG Defs ---
@@ -512,6 +550,7 @@
     // --- Viewport ---
     _applyVP() {
       this.$world.style.transform = `translate(${this.vp.x}px,${this.vp.y}px) scale(${this.vp.s})`;
+      if (this._starfield) this._starfield.setViewport(this.vp.x, this.vp.y);
       this._renderMinimap();
     }
 
