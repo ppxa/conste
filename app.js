@@ -79,12 +79,13 @@
       this.lastShoot = 0;
       this.vpx = 0;
       this.vpy = 0;
+      this.bhParticles = [];
       this._resize();
       this._generate();
-      window.addEventListener('resize', () => { this._resize(); this._generate(); });
+      this._generateBH();
+      window.addEventListener('resize', () => { this._resize(); this._generate(); this._generateBH(); });
       this._loop();
     }
-    // Called by App when viewport changes
     setViewport(x, y) {
       this.vpx = x;
       this.vpy = y;
@@ -102,7 +103,6 @@
     _generate() {
       const count = Math.floor(this.w * this.h / 2000);
       this.stars = [];
-      // 3 depth layers: far (0), mid (1), near (2)
       for (let i = 0; i < count; i++) {
         const layer = i < count * 0.6 ? 0 : i < count * 0.85 ? 1 : 2;
         const r = layer === 0 ? Math.random() * 0.8 + 0.2
@@ -111,7 +111,6 @@
         const a = layer === 0 ? Math.random() * 0.3 + 0.08
                 : layer === 1 ? Math.random() * 0.4 + 0.15
                 : Math.random() * 0.5 + 0.2;
-        // Parallax factor: far stars move less, near stars move more
         const pf = layer === 0 ? 0.02 : layer === 1 ? 0.05 : 0.1;
         this.stars.push({
           x: Math.random() * this.w * 1.4 - this.w * 0.2,
@@ -120,34 +119,193 @@
           sp: Math.random() * 1.5 + 0.3,
           ph: Math.random() * Math.PI * 2,
           pf, layer,
-          // Near stars get subtle color tinting
           color: layer === 2 && Math.random() > 0.6
             ? COLORS[Math.floor(Math.random() * COLORS.length)]
             : null,
         });
       }
     }
+
+    // --- Black Hole ---
+    _generateBH() {
+      this.bhParticles = [];
+      // Accretion disk particles
+      for (let i = 0; i < 80; i++) {
+        this.bhParticles.push({
+          angle: Math.random() * Math.PI * 2,
+          dist: 20 + Math.random() * 55,
+          speed: (0.4 + Math.random() * 0.8),
+          size: Math.random() * 1.4 + 0.3,
+          alpha: Math.random() * 0.7 + 0.2,
+          colorIdx: Math.floor(Math.random() * COLORS.length),
+          z: (Math.random() - 0.5) * 0.6, // vertical offset for 3D disk
+        });
+      }
+    }
+
+    _bhPos() {
+      // Upper-right area with subtle parallax
+      return {
+        x: this.w * 0.78 + this.vpx * 0.025,
+        y: this.h * 0.2 + this.vpy * 0.025,
+      };
+    }
+
+    _drawBlackHole(ctx, t) {
+      const bh = this._bhPos();
+      const bx = bh.x, by = bh.y;
+      const ehR = 16; // event horizon radius
+      const influenceR = 120; // gravitational influence radius
+
+      // 1. Gravitational glow — very subtle large halo
+      const haloG = ctx.createRadialGradient(bx, by, ehR, bx, by, influenceR);
+      haloG.addColorStop(0, 'rgba(80, 50, 180, 0.06)');
+      haloG.addColorStop(0.4, 'rgba(60, 30, 140, 0.03)');
+      haloG.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.beginPath();
+      ctx.arc(bx, by, influenceR, 0, 6.284);
+      ctx.fillStyle = haloG;
+      ctx.fill();
+
+      // 2. Accretion disk — behind the black hole (back half)
+      this._drawAccretionHalf(ctx, t, bx, by, ehR, false);
+
+      // 3. Event horizon — pure darkness with soft edge
+      const ehG = ctx.createRadialGradient(bx, by, ehR * 0.5, bx, by, ehR * 2.5);
+      ehG.addColorStop(0, 'rgba(0, 0, 0, 0.97)');
+      ehG.addColorStop(0.4, 'rgba(0, 0, 0, 0.85)');
+      ehG.addColorStop(0.7, 'rgba(0, 0, 0, 0.3)');
+      ehG.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.beginPath();
+      ctx.arc(bx, by, ehR * 2.5, 0, 6.284);
+      ctx.fillStyle = ehG;
+      ctx.fill();
+
+      // 4. Photon ring — bright thin ellipse at Schwarzschild radius
+      const ringPulse = 0.7 + 0.3 * Math.sin(t * 1.5);
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.rotate(t * 0.08); // very slow rotation
+      ctx.scale(1, 0.38); // flatten into disk perspective
+      ctx.beginPath();
+      ctx.arc(0, 0, ehR * 1.8, 0, 6.284);
+      ctx.strokeStyle = `rgba(180, 160, 255, ${0.25 * ringPulse})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Inner bright ring
+      ctx.beginPath();
+      ctx.arc(0, 0, ehR * 1.3, 0, 6.284);
+      ctx.strokeStyle = `rgba(220, 200, 255, ${0.35 * ringPulse})`;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      ctx.restore();
+
+      // 5. Accretion disk — front half (over the black hole)
+      this._drawAccretionHalf(ctx, t, bx, by, ehR, true);
+
+      // 6. Photon sphere glow — tiny hot glow at edge
+      const psG = ctx.createRadialGradient(bx, by, ehR * 0.8, bx, by, ehR * 1.6);
+      psG.addColorStop(0, 'rgba(160, 130, 255, 0.0)');
+      psG.addColorStop(0.5, 'rgba(160, 130, 255, 0.08)');
+      psG.addColorStop(1, 'rgba(160, 130, 255, 0.0)');
+      ctx.beginPath();
+      ctx.arc(bx, by, ehR * 1.6, 0, 6.284);
+      ctx.fillStyle = psG;
+      ctx.fill();
+    }
+
+    _drawAccretionHalf(ctx, t, bx, by, ehR, front) {
+      for (const p of this.bhParticles) {
+        // Determine if this particle is in front or behind
+        const isFront = Math.sin(p.angle + t * 0.08) > 0;
+        if (isFront !== front) continue;
+
+        // Orbit
+        p.angle += p.speed * 0.012 * (30 / Math.max(p.dist, 15));
+        // Slowly spiral inward
+        p.dist -= 0.008;
+        if (p.dist < 12) {
+          p.dist = 25 + Math.random() * 50;
+          p.angle = Math.random() * Math.PI * 2;
+          p.colorIdx = Math.floor(Math.random() * COLORS.length);
+        }
+
+        // 3D disk projection (elliptical orbit seen at angle)
+        const orbitAngle = p.angle + t * 0.08;
+        const x = bx + Math.cos(orbitAngle) * p.dist;
+        const y = by + Math.sin(orbitAngle) * p.dist * 0.35 + p.z * p.dist * 0.1;
+
+        // Don't draw inside event horizon
+        const dFromCenter = Math.hypot(x - bx, y - by);
+        if (dFromCenter < ehR * 0.7) continue;
+
+        // Doppler-like brightness — brighter on approaching side
+        const doppler = 0.5 + 0.5 * Math.cos(orbitAngle + Math.PI * 0.3);
+        const hex = COLORS[p.colorIdx];
+        const ri = parseInt(hex.slice(1,3),16);
+        const gi = parseInt(hex.slice(3,5),16);
+        const bi = parseInt(hex.slice(5,7),16);
+        const a = p.alpha * doppler * (0.6 + 0.4 * Math.sin(t * 3 + p.angle * 2));
+
+        ctx.beginPath();
+        ctx.arc(x, y, p.size * (0.7 + doppler * 0.5), 0, 6.284);
+        ctx.fillStyle = `rgba(${ri},${gi},${bi},${a})`;
+        ctx.fill();
+
+        // Glow trail for brighter particles
+        if (doppler > 0.6 && p.alpha > 0.4) {
+          ctx.beginPath();
+          ctx.arc(x, y, p.size * 2.5, 0, 6.284);
+          ctx.fillStyle = `rgba(${ri},${gi},${bi},${a * 0.15})`;
+          ctx.fill();
+        }
+      }
+    }
+
+    // Gravitational lensing — bend star positions toward black hole
+    _lenseStar(wx, wy) {
+      const bh = this._bhPos();
+      const dx = bh.x - wx, dy = bh.y - wy;
+      const dist = Math.hypot(dx, dy);
+      const influenceR = 130;
+      if (dist > influenceR || dist < 5) return { x: wx, y: wy, dim: 0 };
+      // Gravitational pull strength (inverse square, capped)
+      const strength = Math.pow(1 - dist / influenceR, 2) * 18;
+      const nx = dx / dist, ny = dy / dist;
+      // How much to dim (absorbed near event horizon)
+      const dim = dist < 30 ? Math.pow(1 - dist / 30, 2) : 0;
+      return {
+        x: wx + nx * strength,
+        y: wy + ny * strength,
+        dim,
+      };
+    }
+
     _loop() {
       const ctx = this.ctx;
       ctx.clearRect(0, 0, this.w, this.h);
       const t = performance.now() / 1000;
 
-      // Stars with parallax
+      // Stars with parallax + gravitational lensing
       for (const s of this.stars) {
         const tw = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
-        const alpha = s.a * (0.3 + 0.7 * tw);
-        // Parallax offset from viewport
+        let alpha = s.a * (0.3 + 0.7 * tw);
         const px = s.x + this.vpx * s.pf;
         const py = s.y + this.vpy * s.pf;
-        // Wrap around screen edges with margin
-        const wx = ((px % (this.w * 1.4)) + this.w * 1.4) % (this.w * 1.4) - this.w * 0.2;
-        const wy = ((py % (this.h * 1.4)) + this.h * 1.4) % (this.h * 1.4) - this.h * 0.2;
+        let wx = ((px % (this.w * 1.4)) + this.w * 1.4) % (this.w * 1.4) - this.w * 0.2;
+        let wy = ((py % (this.h * 1.4)) + this.h * 1.4) % (this.h * 1.4) - this.h * 0.2;
         if (wx < -10 || wx > this.w + 10 || wy < -10 || wy > this.h + 10) continue;
+
+        // Gravitational lensing
+        const lens = this._lenseStar(wx, wy);
+        wx = lens.x;
+        wy = lens.y;
+        alpha *= (1 - lens.dim); // dim near event horizon
+        if (alpha < 0.01) continue;
+
         ctx.beginPath();
         ctx.arc(wx, wy, s.r, 0, 6.284);
         if (s.color) {
-          ctx.fillStyle = s.color.replace(')', `,${alpha})`).replace('rgb', 'rgba').replace('#', '');
-          // Hex to rgba
           const hex = s.color;
           const ri = parseInt(hex.slice(1,3),16);
           const gi = parseInt(hex.slice(3,5),16);
@@ -158,6 +316,9 @@
         }
         ctx.fill();
       }
+
+      // Black hole (between stars and shooting stars for depth)
+      this._drawBlackHole(ctx, t);
 
       // Shooting stars
       if (t - this.lastShoot > 4 + Math.random() * 8) {
