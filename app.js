@@ -461,6 +461,12 @@
       this.$reminderClear = document.getElementById('editor-reminder-clear');
       this.$editorPreview = document.getElementById('editor-preview');
       this.$editorPreviewToggle = document.getElementById('editor-preview-toggle');
+      this.$worldBH = document.getElementById('world-blackhole');
+      this._bhWorldPos = { x: 500, y: -400 }; // world coordinates
+      this.$fabDiscover = document.getElementById('fab-discover');
+      this.$discoverPanel = document.getElementById('discover-panel');
+      this.$discoverResults = document.getElementById('discover-results');
+      this.$discoverClose = document.getElementById('discover-close');
       this.$toast = document.getElementById('toast');
       this.$hint = document.getElementById('link-hint');
       this.$nodeCount = document.getElementById('node-count');
@@ -489,11 +495,22 @@
       this.$svg.appendChild(defs);
     }
 
-    // --- Node Width ---
+    // --- Node Width & Scale ---
     _getNodeWidth(n) {
       const el = this.$nodes.querySelector(`[data-id="${n.id}"]`);
       if (el) return el.offsetWidth || NODE_W_DEFAULT;
       return NODE_W_DEFAULT;
+    }
+
+    _calcNodeScale(n) {
+      // Scale based on links (quantity) + content length (quality)
+      const linkCount = this.store.linksOf(n.id).length;
+      const contentLen = (n.content || '').length;
+      // Link factor: 0 links = 1.0, each link adds 0.08, max ~1.5
+      const linkFactor = Math.min(linkCount * 0.08, 0.5);
+      // Content factor: 0 chars = 0, scales up to 0.3 for 500+ chars
+      const contentFactor = Math.min(contentLen / 1500, 0.3);
+      return 1 + linkFactor + contentFactor;
     }
 
     // --- Events ---
@@ -569,6 +586,9 @@
           this.$searchResults.classList.remove('open');
         }
       });
+      // Discover
+      this.$fabDiscover.addEventListener('click', () => this._toggleDiscoverPanel());
+      this.$discoverClose.addEventListener('click', () => this._hideDiscoverPanel());
       // Resize
       window.addEventListener('resize', () => this._render());
     }
@@ -676,6 +696,19 @@
       if (this.dragging && this.touchInfo.moved) {
         const d = this.dragging;
         d.el.classList.remove('dragging');
+        // Black hole delete
+        if (this._nearBH) {
+          this._pushUndo();
+          this._nearBH = false;
+          this.$worldBH.classList.remove('bh-active');
+          d.el.classList.add('removing');
+          d.el.style.transformOrigin = 'center center';
+          setTimeout(() => { this.store.deleteNode(d.node.id); this._render(); }, 300);
+          this._showToast('Consumed by black hole');
+          if (navigator.vibrate) navigator.vibrate([15, 50, 15]);
+          this.dragging = null; this.panning = null; this.touchInfo = null;
+          return;
+        }
         if (this.overlapTarget) {
           this._pushUndo();
           const linked = this.store.toggleLink(d.node.id, this.overlapTarget.id);
@@ -692,7 +725,9 @@
         this._render();
       } else if (wasTap) {
         if (this.touchInfo.nodeEl) {
-          this._openEditor(this.touchInfo.nodeEl.dataset.id);
+          const tapId = this.touchInfo.nodeEl.dataset.id;
+          if (this.store.linksOf(tapId).length > 0) this._propagateLinks(tapId);
+          this._openEditor(tapId);
         } else {
           const wp = this._s2w(this.touchInfo.x, this.touchInfo.y);
           this._createNode(wp.x - NODE_W_DEFAULT / 2, wp.y - 28);
@@ -722,6 +757,9 @@
     // --- Viewport ---
     _applyVP() {
       this.$world.style.transform = `translate(${this.vp.x}px,${this.vp.y}px) scale(${this.vp.s})`;
+      // Counter-scale for title readability at zoom out
+      const counterScale = this.vp.s < 0.6 ? 0.6 / this.vp.s : 1;
+      this.$world.style.setProperty('--title-counter-scale', counterScale);
       if (this._starfield) this._starfield.setViewport(this.vp.x, this.vp.y);
       this._renderMinimap();
     }
@@ -766,6 +804,10 @@
       let closest = null, closestD = Infinity;
       const cx1 = dragNode.x + this._getNodeWidth(dragNode) / 2;
       const cy1 = dragNode.y + 30;
+      // Check black hole proximity
+      const bhDist = hypot(cx1, cy1, this._bhWorldPos.x, this._bhWorldPos.y);
+      this._nearBH = bhDist < 80;
+      this.$worldBH.classList.toggle('bh-active', this._nearBH);
       for (const n of this.store.data.nodes) {
         if (n.id === dragNode.id) continue;
         const d = hypot(cx1, cy1, n.x + this._getNodeWidth(n) / 2, n.y + 30);
@@ -899,6 +941,64 @@
       if (on) {
         this.$editorPreview.innerHTML = renderMD(this.$editorContent.value);
       }
+    }
+
+    // --- Link Propagation Animation ---
+    _propagateLinks(startId) {
+      const visited = new Set();
+      const queue = [{ id: startId, depth: 0 }];
+      visited.add(startId);
+      // BFS to collect all connected nodes with depth
+      const waves = [];
+      while (queue.length) {
+        const { id, depth } = queue.shift();
+        if (!waves[depth]) waves[depth] = [];
+        waves[depth].push(id);
+        const links = this.store.linksOf(id);
+        for (const l of links) {
+          const nid = l.s === id ? l.t : l.s;
+          if (!visited.has(nid)) {
+            visited.add(nid);
+            queue.push({ id: nid, depth: depth + 1 });
+          }
+        }
+      }
+      // Dim all nodes first
+      this.$nodes.querySelectorAll('.node').forEach(el => {
+        if (!visited.has(el.dataset.id)) el.classList.add('propagate-dim');
+      });
+      // Animate waves
+      const delay = 250;
+      for (let w = 0; w < waves.length; w++) {
+        setTimeout(() => {
+          for (const nid of waves[w]) {
+            const el = this.$nodes.querySelector(`[data-id="${nid}"]`);
+            if (el) el.classList.add('propagate-glow');
+          }
+          // Highlight links between this wave and previous
+          if (w > 0) {
+            const prevSet = new Set(waves[w - 1]);
+            const curSet = new Set(waves[w]);
+            this.$svg.querySelectorAll('.connection-line').forEach(line => {
+              const sid = line.dataset?.s;
+              const tid = line.dataset?.t;
+              if ((prevSet.has(sid) && curSet.has(tid)) || (prevSet.has(tid) && curSet.has(sid))) {
+                line.classList.add('propagate-active');
+              }
+            });
+          }
+        }, w * delay);
+      }
+      // Clear after full propagation
+      const totalTime = waves.length * delay + 1500;
+      setTimeout(() => {
+        this.$nodes.querySelectorAll('.propagate-glow,.propagate-dim').forEach(el => {
+          el.classList.remove('propagate-glow', 'propagate-dim');
+        });
+        this.$svg.querySelectorAll('.propagate-active').forEach(el => {
+          el.classList.remove('propagate-active');
+        });
+      }, totalTime);
     }
 
     // --- Reminder ---
@@ -1551,6 +1651,11 @@
       this._updateCount();
       this._renderTagFilter();
       this._renderMinimap();
+      this._positionWorldBH();
+    }
+
+    _positionWorldBH() {
+      this.$worldBH.style.transform = `translate(${this._bhWorldPos.x - 60}px, ${this._bhWorldPos.y - 60}px)`;
     }
 
     _renderNodes() {
@@ -1626,7 +1731,8 @@
     }
 
     _positionNode(n, el) {
-      el.style.transform = `translate(${n.x}px, ${n.y}px)`;
+      const s = this._calcNodeScale(n);
+      el.style.transform = `translate(${n.x}px, ${n.y}px) scale(${s})`;
     }
 
     _renderLinks() {
@@ -1663,8 +1769,124 @@
         line.setAttribute('stroke', a.color);
         line.setAttribute('stroke-opacity', '0.4');
         line.setAttribute('stroke-width', '1.2');
+        line.dataset.s = lk.s;
+        line.dataset.t = lk.t;
         this.$svg.appendChild(line);
       }
+    }
+
+    // --- Discover: Constellation Finder ---
+    _toggleDiscoverPanel() {
+      if (this.$discoverPanel.classList.contains('open')) {
+        this._hideDiscoverPanel();
+      } else {
+        this._showDiscoverPanel();
+      }
+    }
+    _showDiscoverPanel() {
+      const connections = this._findHiddenConnections();
+      this.$discoverResults.innerHTML = '';
+      if (!connections.length) {
+        this.$discoverResults.innerHTML = '<div class="discover-empty">No hidden connections found yet. Add more nodes with tags or content to discover links!</div>';
+      } else {
+        connections.forEach(c => {
+          const item = document.createElement('div');
+          item.className = 'discover-item';
+          item.innerHTML = `
+            <div class="discover-names">
+              <span class="discover-dot" style="background:${c.a.color}"></span>
+              <span>${c.a.title || 'Untitled'}</span>
+              <span class="discover-arrow">⟷</span>
+              <span class="discover-dot" style="background:${c.b.color}"></span>
+              <span>${c.b.title || 'Untitled'}</span>
+            </div>
+            <div class="discover-reason">${c.reason}</div>
+          `;
+          item.addEventListener('click', () => {
+            this._hideDiscoverPanel();
+            // Zoom to midpoint of the two nodes
+            const mx = (c.a.x + c.b.x) / 2;
+            const my = (c.a.y + c.b.y) / 2;
+            const cw = this.$container.clientWidth;
+            const ch = this.$container.clientHeight;
+            this.vp.x = cw / 2 - mx * this.vp.s;
+            this.vp.y = ch / 2 - my * this.vp.s;
+            this._applyVP();
+            this._render();
+            // Briefly highlight both nodes
+            const elA = this.$nodes.querySelector(`[data-id="${c.a.id}"]`);
+            const elB = this.$nodes.querySelector(`[data-id="${c.b.id}"]`);
+            if (elA) { elA.classList.add('search-highlight'); setTimeout(() => elA.classList.remove('search-highlight'), 2000); }
+            if (elB) { elB.classList.add('search-highlight'); setTimeout(() => elB.classList.remove('search-highlight'), 2000); }
+          });
+          this.$discoverResults.appendChild(item);
+        });
+      }
+      this.$discoverPanel.classList.add('open');
+      this.$fabDiscover.classList.add('active');
+    }
+    _hideDiscoverPanel() {
+      this.$discoverPanel.classList.remove('open');
+      this.$fabDiscover.classList.remove('active');
+    }
+    _findHiddenConnections() {
+      const nodes = this.store.data.nodes;
+      if (nodes.length < 2) return [];
+      const results = [];
+      // Extract keywords from content (simple word tokenization)
+      const getWords = (text) => {
+        if (!text) return new Set();
+        return new Set(
+          text.toLowerCase()
+            .replace(/[^a-zA-Z0-9\u3000-\u9FFF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u309F\u30A0-\u30FF]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2)
+        );
+      };
+      // Cache per-node data
+      const nodeData = nodes.map(n => ({
+        node: n,
+        tags: new Set((n.tags || []).map(t => t.toLowerCase())),
+        words: getWords(n.content),
+        titleWords: getWords(n.title)
+      }));
+      // Compare all unlinked pairs
+      for (let i = 0; i < nodeData.length; i++) {
+        for (let j = i + 1; j < nodeData.length; j++) {
+          const a = nodeData[i], b = nodeData[j];
+          if (this.store.hasLink(a.node.id, b.node.id)) continue;
+          let score = 0;
+          const reasons = [];
+          // Shared tags
+          const sharedTags = [...a.tags].filter(t => b.tags.has(t));
+          if (sharedTags.length) {
+            score += sharedTags.length * 3;
+            reasons.push(`Shared tags: ${sharedTags.join(', ')}`);
+          }
+          // Shared content words (need at least 3 common words)
+          const sharedWords = [...a.words].filter(w => b.words.has(w));
+          if (sharedWords.length >= 3) {
+            score += Math.min(sharedWords.length, 10);
+            reasons.push(`${sharedWords.length} common keywords`);
+          }
+          // Title word overlap
+          const titleOverlap = [...a.titleWords].filter(w => b.titleWords.has(w));
+          if (titleOverlap.length) {
+            score += titleOverlap.length * 2;
+            reasons.push(`Similar titles`);
+          }
+          // Same color (weak signal)
+          if (a.node.color === b.node.color && a.node.color !== COLORS[0]) {
+            score += 1;
+          }
+          if (score >= 3) {
+            results.push({ a: a.node, b: b.node, score, reason: reasons.join(' · ') });
+          }
+        }
+      }
+      // Sort by score descending, return top 10
+      results.sort((a, b) => b.score - a.score);
+      return results.slice(0, 10);
     }
 
     _updateCount() {
