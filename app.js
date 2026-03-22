@@ -29,13 +29,14 @@
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
   const planetGrad = hex => {
     const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-    const hi = `rgba(${Math.min(r+120,255)},${Math.min(g+120,255)},${Math.min(b+120,255)},1)`;
+    const hi = `rgba(${Math.min(r+100,255)},${Math.min(g+100,255)},${Math.min(b+100,255)},0.85)`;
     const mid = `rgba(${r},${g},${b},1)`;
-    const lo = `rgba(${Math.max(r-80,0)},${Math.max(g-80,0)},${Math.max(b-80,0)},1)`;
-    const dark = `rgba(${Math.max(r-120,0)},${Math.max(g-120,0)},${Math.max(b-120,0)},1)`;
-    // Specular highlight + lit surface + terminator + dark side
-    return `radial-gradient(circle at 30% 25%, ${hi} 0%, transparent 25%),`
-      + `radial-gradient(circle at 38% 35%, ${mid} 0%, ${lo} 55%, ${dark} 100%)`;
+    const lo = `rgba(${Math.max(r-50,0)},${Math.max(g-50,0)},${Math.max(b-50,0)},1)`;
+    const dark = `rgba(${Math.max(r-100,0)},${Math.max(g-100,0)},${Math.max(b-100,0)},1)`;
+    const rim = `rgba(${Math.min(r+60,255)},${Math.min(g+60,255)},${Math.min(b+60,255)},0.3)`;
+    return `radial-gradient(circle at 32% 28%, ${hi} 0%, transparent 18%),`
+      + `radial-gradient(circle at 68% 75%, ${rim} 0%, transparent 22%),`
+      + `radial-gradient(ellipse at 40% 40%, ${mid} 0%, ${lo} 60%, ${dark} 100%)`;
   };
 
   // ============================================================
@@ -906,7 +907,7 @@
         id: uid(), x, y,
         title: '', content: '',
         color: pick(COLORS),
-        depth: 0.9 + Math.random() * 0.2,
+        depth: 0.75 + Math.random() * 0.5,
         createdAt: Date.now(), updatedAt: Date.now(),
       });
       this._render();
@@ -1731,12 +1732,10 @@
           el.classList.remove('entering', 'snap-back');
         }
         this._updateNodeEl(n, el);
-        // Tag filter
+        // Tag filter (overrides depth opacity when active)
         if (this._activeTagFilter) {
           const match = n.tags && n.tags.includes(this._activeTagFilter);
-          el.style.opacity = match ? '' : '0.15';
-        } else {
-          el.style.opacity = '';
+          if (!match) el.style.opacity = '0.15';
         }
       }
       // Remove stale
@@ -1750,7 +1749,10 @@
       const d = r * 2;
       this._positionNode(n, el);
       const depth = n.depth || 1;
-      el.style.filter = depth !== 1 ? `brightness(${depth})` : '';
+      // Depth affects brightness + slight blur for far nodes
+      const bright = 0.7 + depth * 0.35;
+      el.style.filter = `brightness(${bright.toFixed(2)})`;
+      el.style.opacity = (0.6 + depth * 0.4).toFixed(2);
       el.style.setProperty('--node-color', n.color);
       el.style.width = d + 'px';
       // Planet body
@@ -1758,7 +1760,7 @@
       star.style.width = d + 'px';
       star.style.height = d + 'px';
       star.style.background = planetGrad(n.color);
-      star.style.boxShadow = `0 0 ${r * 0.7}px ${n.color}50, 0 0 ${r * 1.4}px ${n.color}18, inset -${r * 0.3}px -${r * 0.3}px ${r * 0.6}px rgba(0,0,0,0.5), inset ${r * 0.15}px ${r * 0.15}px ${r * 0.3}px rgba(255,255,255,0.08)`;
+      star.style.boxShadow = `0 0 ${r}px ${n.color}30, 0 0 ${r * 2}px ${n.color}10, inset -${r * 0.35}px -${r * 0.25}px ${r * 0.5}px rgba(0,0,0,0.55), inset ${r * 0.1}px ${r * 0.1}px ${r * 0.25}px rgba(255,255,255,0.06)`;
       // Title
       el.querySelector('.node-title').textContent = n.title || 'Untitled';
       // Reminder
@@ -1792,7 +1794,10 @@
     }
 
     _positionNode(n, el) {
-      el.style.transform = `translate(${n.x}px, ${n.y}px)`;
+      const depth = n.depth || 1;
+      // Depth affects scale: closer nodes (depth>1) appear larger, farther nodes smaller
+      const depthScale = 0.7 + depth * 0.3;
+      el.style.transform = `translate(${n.x}px, ${n.y}px) scale(${depthScale.toFixed(3)})`;
     }
 
     _renderLinks() {

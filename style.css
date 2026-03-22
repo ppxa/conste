@@ -124,7 +124,7 @@ input, textarea {
   height: 100%;
   overflow: visible;
   pointer-events: none;
-  z-index: 1;
+  z-index: 3;
 }
 
 .connection-glow {
@@ -260,6 +260,7 @@ input, textarea {
 
 .node-star {
   border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   flex-shrink: 0;
   /* size, gradient, glow set inline by JS */
