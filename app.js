@@ -12,9 +12,7 @@
   const TAP_THRESHOLD = 10;
   const TAP_TIMEOUT = 280;
   const OVERLAP_DIST = 90;
-  const PLANET_R_BASE = 22;   // radius at 0 links
-  const PLANET_R_MAX  = 52;   // max radius
-  const NODE_W_DEFAULT = PLANET_R_BASE * 2; // alias for compatibility
+  const NODE_W_DEFAULT = 140; // fallback for nodes not yet measured
   const MIN_SCALE = 0.25;
   const MAX_SCALE = 3;
   const TILT_MAX_DEG = 2.5;
@@ -27,18 +25,6 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const hypot = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay);
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
-  const planetGrad = hex => {
-    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-    const spec = `rgba(${Math.min(r+140,255)},${Math.min(g+140,255)},${Math.min(b+140,255)},0.7)`;
-    const hi = `rgba(${Math.min(r+60,255)},${Math.min(g+60,255)},${Math.min(b+60,255)},1)`;
-    const mid = `rgba(${r},${g},${b},1)`;
-    const lo = `rgba(${Math.max(r-40,0)},${Math.max(g-40,0)},${Math.max(b-40,0)},1)`;
-    const dark = `rgba(${Math.max(r-90,0)},${Math.max(g-90,0)},${Math.max(b-90,0)},1)`;
-    // Specular dot + atmosphere highlight + base sphere
-    return `radial-gradient(circle at 35% 30%, ${spec} 0%, transparent 12%),`
-      + `radial-gradient(circle at 38% 34%, ${hi} 0%, transparent 35%),`
-      + `radial-gradient(ellipse at 45% 45%, ${mid} 20%, ${lo} 65%, ${dark} 100%)`;
-  };
 
   // ============================================================
   // Store — data persistence
@@ -521,14 +507,23 @@
       this.$svg.appendChild(defs);
     }
 
-    // --- Planet Radius & Width ---
-    _getPlanetRadius(n) {
-      const linkCount = this.store.linksOf(n.id).length;
-      return clamp(PLANET_R_BASE + linkCount * 4, PLANET_R_BASE, PLANET_R_MAX);
+    // --- Node Width & Scale ---
+    _getNodeWidth(n) {
+      const el = this.$nodes.querySelector(`[data-id="${n.id}"]`);
+      if (el) return el.offsetWidth || NODE_W_DEFAULT;
+      return NODE_W_DEFAULT;
     }
 
-    _getNodeWidth(n) {
-      return this._getPlanetRadius(n) * 2;
+    _calcNodeScale(n) {
+      // Scale based on links (quantity) + content length (quality)
+      const linkCount = this.store.linksOf(n.id).length;
+      const contentLen = (n.content || '').length;
+      // Link factor: 0 links = 1.0, each link adds 0.08, max ~1.5
+      const linkFactor = Math.min(linkCount * 0.08, 0.5);
+      // Content factor: 0 chars = 0, scales up to 0.3 for 500+ chars
+      const contentFactor = Math.min(contentLen / 1500, 0.3);
+      const depth = n.depth || 1;
+      return (1 + linkFactor + contentFactor) * depth;
     }
 
     // --- Events ---
@@ -761,7 +756,7 @@
           this._openEditor(tapId);
         } else {
           const wp = this._s2w(this.touchInfo.x, this.touchInfo.y);
-          this._createNode(wp.x - PLANET_R_BASE, wp.y - PLANET_R_BASE);
+          this._createNode(wp.x - NODE_W_DEFAULT / 2, wp.y - 28);
         }
       }
 
@@ -802,7 +797,6 @@
       const counterScale = this.vp.s < 0.6 ? 0.6 / this.vp.s : 1;
       this.$world.style.setProperty('--title-counter-scale', counterScale);
       if (this._starfield) this._starfield.setViewport(this.vp.x, this.vp.y);
-      this._updateNodePositions();
       this._renderMinimap();
     }
 
@@ -826,8 +820,8 @@
         this.vp.x = window.innerWidth / 2;
         this.vp.y = window.innerHeight / 2;
       } else {
-        const ax = nodes.reduce((s, n) => s + n.x + this._getPlanetRadius(n), 0) / nodes.length;
-        const ay = nodes.reduce((s, n) => s + n.y + this._getPlanetRadius(n), 0) / nodes.length;
+        const ax = nodes.reduce((s, n) => s + n.x + this._getNodeWidth(n) / 2, 0) / nodes.length;
+        const ay = nodes.reduce((s, n) => s + n.y + 30, 0) / nodes.length;
         this.vp.x = window.innerWidth / 2 - ax * this.vp.s;
         this.vp.y = window.innerHeight / 2 - ay * this.vp.s;
       }
@@ -842,9 +836,8 @@
       for (const n of nodes) {
         minX = Math.min(minX, n.x);
         minY = Math.min(minY, n.y);
-        const r2 = this._getPlanetRadius(n) * 2;
-        maxX = Math.max(maxX, n.x + r2);
-        maxY = Math.max(maxY, n.y + r2 + 24);
+        maxX = Math.max(maxX, n.x + this._getNodeWidth(n));
+        maxY = Math.max(maxY, n.y + 80);
       }
       const cw = window.innerWidth - pad * 2;
       const ch = window.innerHeight - pad * 2;
@@ -859,17 +852,15 @@
     // --- Overlap Detection ---
     _checkOverlap(dragNode) {
       let closest = null, closestD = Infinity;
-      const dr = this._getPlanetRadius(dragNode);
-      const cx1 = dragNode.x + dr;
-      const cy1 = dragNode.y + dr;
+      const cx1 = dragNode.x + this._getNodeWidth(dragNode) / 2;
+      const cy1 = dragNode.y + 30;
       // Check black hole proximity
       const bhDist = hypot(cx1, cy1, this._bhWorldPos.x, this._bhWorldPos.y);
       this._nearBH = bhDist < 80;
       this.$worldBH.classList.toggle('bh-active', this._nearBH);
       for (const n of this.store.data.nodes) {
         if (n.id === dragNode.id) continue;
-        const nr = this._getPlanetRadius(n);
-        const d = hypot(cx1, cy1, n.x + nr, n.y + nr);
+        const d = hypot(cx1, cy1, n.x + this._getNodeWidth(n) / 2, n.y + 30);
         if (d < OVERLAP_DIST && d < closestD) { closest = n; closestD = d; }
       }
       if (closest !== this.overlapTarget) {
@@ -909,7 +900,7 @@
         id: uid(), x, y,
         title: '', content: '',
         color: pick(COLORS),
-        depth: 0.75 + Math.random() * 0.5,
+        depth: 0.9 + Math.random() * 0.2,
         createdAt: Date.now(), updatedAt: Date.now(),
       });
       this._render();
@@ -924,7 +915,7 @@
 
     _createAtCenter() {
       const c = this._s2w(window.innerWidth / 2, window.innerHeight / 2);
-      this._createNode(c.x - PLANET_R_BASE, c.y - PLANET_R_BASE);
+      this._createNode(c.x - NODE_W_DEFAULT / 2, c.y - 28);
     }
 
     _deleteCurrent() {
@@ -1157,6 +1148,8 @@
       const el = this.$nodes.querySelector(`[data-id="${this.editorNodeId}"]`);
       if (el) {
         el.querySelector('.node-title').textContent = this.$editorTitle.value || 'Untitled';
+        const preview = this.$editorContent.value.slice(0, 50);
+        el.querySelector('.node-preview').textContent = preview;
       }
     }
 
@@ -1259,11 +1252,11 @@
       // Compute bounds
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const n of nodes) {
-        const r2 = this._getPlanetRadius(n) * 2;
+        const nw = this._getNodeWidth(n);
         minX = Math.min(minX, n.x);
         minY = Math.min(minY, n.y);
-        maxX = Math.max(maxX, n.x + r2);
-        maxY = Math.max(maxY, n.y + r2);
+        maxX = Math.max(maxX, n.x + nw);
+        maxY = Math.max(maxY, n.y + 80);
       }
       const pad = 20;
       const bw = (maxX - minX) || 1;
@@ -1281,9 +1274,8 @@
         if (!a || !b) continue;
         ctx.strokeStyle = 'rgba(255,255,255,0.15)';
         ctx.beginPath();
-        const ra = this._getPlanetRadius(a), rb2 = this._getPlanetRadius(b);
-        ctx.moveTo(a.x * scale + ox + ra * scale, a.y * scale + oy + ra * scale);
-        ctx.lineTo(b.x * scale + ox + rb2 * scale, b.y * scale + oy + rb2 * scale);
+        ctx.moveTo(a.x * scale + ox + this._getNodeWidth(a) * scale / 2, a.y * scale + oy + 5);
+        ctx.lineTo(b.x * scale + ox + this._getNodeWidth(b) * scale / 2, b.y * scale + oy + 5);
         ctx.stroke();
       }
 
@@ -1292,8 +1284,7 @@
         const nx = n.x * scale + ox;
         const ny = n.y * scale + oy;
         ctx.beginPath();
-        const nr = this._getPlanetRadius(n);
-        ctx.arc(nx + nr * scale, ny + nr * scale, 2.5, 0, 6.284);
+        ctx.arc(nx + this._getNodeWidth(n) * scale / 2, ny + 5, 2.5, 0, 6.284);
         ctx.fillStyle = n.color;
         ctx.fill();
       }
@@ -1638,10 +1629,10 @@
     _zoomToNode(id) {
       const n = this.store.getNode(id);
       if (!n) return;
-      const r = this._getPlanetRadius(n);
+      const nw = this._getNodeWidth(n);
       this.vp.s = clamp(this.vp.s, 0.8, 1.5);
-      this.vp.x = window.innerWidth / 2 - (n.x + r) * this.vp.s;
-      this.vp.y = window.innerHeight / 2 - (n.y + r) * this.vp.s;
+      this.vp.x = window.innerWidth / 2 - (n.x + nw / 2) * this.vp.s;
+      this.vp.y = window.innerHeight / 2 - (n.y + 30) * this.vp.s;
       this._applyVP();
       // Flash highlight
       const el = this.$nodes.querySelector(`[data-id="${id}"]`);
@@ -1676,7 +1667,7 @@
     }
 
     _createDemoContent() {
-      const cx = -PLANET_R_BASE, cy = -PLANET_R_BASE;
+      const cx = -NODE_W_DEFAULT / 2, cy = -30;
       const w = this.store.addNode({
         id: uid(), x: cx, y: cy,
         title: 'Welcome!', content: 'Drag me onto another note to create a link.\nTap me to edit.',
@@ -1727,17 +1718,19 @@
           el = document.createElement('div');
           el.className = 'node';
           el.dataset.id = n.id;
-          el.innerHTML = `<div class="node-star"></div><div class="node-title"></div><div class="node-reminder-badge"></div>`;
+          el.innerHTML = `<div class="node-star"></div><div class="node-title"></div><div class="node-preview"></div><div class="node-reminder-badge"></div><div class="node-link-badge"></div>`;
           this.$nodes.appendChild(el);
         } else {
           // Clean up stale animation classes
           el.classList.remove('entering', 'snap-back');
         }
         this._updateNodeEl(n, el);
-        // Tag filter (overrides depth opacity when active)
+        // Tag filter
         if (this._activeTagFilter) {
           const match = n.tags && n.tags.includes(this._activeTagFilter);
-          if (!match) el.style.opacity = '0.15';
+          el.style.opacity = match ? '' : '0.15';
+        } else {
+          el.style.opacity = '';
         }
       }
       // Remove stale
@@ -1747,34 +1740,26 @@
     }
 
     _updateNodeEl(n, el) {
-      const r = this._getPlanetRadius(n);
-      const d = r * 2;
       this._positionNode(n, el);
       const depth = n.depth || 1;
-      // Far nodes: dimmer, slightly blurred; near nodes: vivid
-      const bright = 0.75 + depth * 0.3;
-      const blur = depth < 0.85 ? (0.85 - depth) * 3 : 0;
-      el.style.filter = blur > 0
-        ? `brightness(${bright.toFixed(2)}) blur(${blur.toFixed(1)}px)`
-        : `brightness(${bright.toFixed(2)})`;
-      el.style.opacity = (0.55 + depth * 0.45).toFixed(2);
+      el.style.filter = depth !== 1 ? `brightness(${depth})` : '';
       el.style.setProperty('--node-color', n.color);
-      el.style.width = d + 'px';
-      // Planet body
       const star = el.querySelector('.node-star');
-      star.style.width = d + 'px';
-      star.style.height = d + 'px';
-      star.style.background = planetGrad(n.color);
-      star.style.boxShadow = `0 0 ${r * 0.5}px ${n.color}40, 0 0 ${r * 1.5}px ${n.color}15, inset -${r * 0.3}px -${r * 0.2}px ${r * 0.4}px rgba(0,0,0,0.6)`;
-      // Title
+      star.style.background = n.color;
+      star.style.boxShadow = `0 0 10px ${n.color}90`;
       el.querySelector('.node-title').textContent = n.title || 'Untitled';
+      el.querySelector('.node-preview').textContent = n.content ? n.content.slice(0, 50) : '';
+      const lc = this.store.linksOf(n.id).length;
+      const badge = el.querySelector('.node-link-badge');
+      badge.textContent = lc;
+      el.classList.toggle('has-links', lc > 0);
       // Reminder
       const rb = el.querySelector('.node-reminder-badge');
       if (n.reminder) {
         const now = Date.now();
         const diff = n.reminder - now;
         const overdue = diff < 0;
-        const soon = !overdue && diff < 3600000;
+        const soon = !overdue && diff < 3600000; // within 1 hour
         el.classList.toggle('reminder-overdue', overdue);
         el.classList.toggle('reminder-soon', soon);
         rb.textContent = overdue ? 'Overdue' : this._formatReminder(n.reminder);
@@ -1799,22 +1784,8 @@
     }
 
     _positionNode(n, el) {
-      const depth = n.depth || 1;
-      const depthScale = 0.75 + depth * 0.3;
-      // Parallax: offset from viewport center based on depth
-      const vcx = (window.innerWidth / 2 - this.vp.x) / this.vp.s;
-      const vcy = (window.innerHeight / 2 - this.vp.y) / this.vp.s;
-      const pf = (depth - 1) * 0.12; // parallax factor: nearer=positive, farther=negative
-      const px = (n.x - vcx) * pf;
-      const py = (n.y - vcy) * pf;
-      el.style.transform = `translate(${(n.x + px).toFixed(1)}px, ${(n.y + py).toFixed(1)}px) scale(${depthScale.toFixed(3)})`;
-    }
-
-    _updateNodePositions() {
-      for (const n of this.store.data.nodes) {
-        const el = this.$nodes.querySelector(`[data-id="${n.id}"]`);
-        if (el) this._positionNode(n, el);
-      }
+      const s = this._calcNodeScale(n);
+      el.style.transform = `translate(${n.x}px, ${n.y}px) scale(${s})`;
     }
 
     _renderLinks() {
@@ -1830,9 +1801,8 @@
         const b = this.store.getNode(lk.t);
         if (!a || !b) continue;
 
-        const ra = this._getPlanetRadius(a), rb = this._getPlanetRadius(b);
-        const x1 = a.x + ra, y1 = a.y + ra;
-        const x2 = b.x + rb, y2 = b.y + rb;
+        const x1 = a.x + this._getNodeWidth(a) / 2, y1 = a.y + 12;
+        const x2 = b.x + this._getNodeWidth(b) / 2, y2 = b.y + 12;
 
         // Glow line
         const glow = document.createElementNS(ns, 'line');
