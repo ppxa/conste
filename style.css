@@ -259,11 +259,21 @@ input, textarea {
 }
 
 .node-star {
+  position: relative;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   flex-shrink: 0;
   /* size, gradient, glow set inline by JS */
+}
+
+.node-star::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.08) 0%, transparent 50%);
+  pointer-events: none;
 }
 
 .node-title {

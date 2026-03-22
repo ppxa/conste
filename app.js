@@ -29,14 +29,15 @@
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
   const planetGrad = hex => {
     const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-    const hi = `rgba(${Math.min(r+100,255)},${Math.min(g+100,255)},${Math.min(b+100,255)},0.85)`;
+    const spec = `rgba(${Math.min(r+140,255)},${Math.min(g+140,255)},${Math.min(b+140,255)},0.7)`;
+    const hi = `rgba(${Math.min(r+60,255)},${Math.min(g+60,255)},${Math.min(b+60,255)},1)`;
     const mid = `rgba(${r},${g},${b},1)`;
-    const lo = `rgba(${Math.max(r-50,0)},${Math.max(g-50,0)},${Math.max(b-50,0)},1)`;
-    const dark = `rgba(${Math.max(r-100,0)},${Math.max(g-100,0)},${Math.max(b-100,0)},1)`;
-    const rim = `rgba(${Math.min(r+60,255)},${Math.min(g+60,255)},${Math.min(b+60,255)},0.3)`;
-    return `radial-gradient(circle at 32% 28%, ${hi} 0%, transparent 18%),`
-      + `radial-gradient(circle at 68% 75%, ${rim} 0%, transparent 22%),`
-      + `radial-gradient(ellipse at 40% 40%, ${mid} 0%, ${lo} 60%, ${dark} 100%)`;
+    const lo = `rgba(${Math.max(r-40,0)},${Math.max(g-40,0)},${Math.max(b-40,0)},1)`;
+    const dark = `rgba(${Math.max(r-90,0)},${Math.max(g-90,0)},${Math.max(b-90,0)},1)`;
+    // Specular dot + atmosphere highlight + base sphere
+    return `radial-gradient(circle at 35% 30%, ${spec} 0%, transparent 12%),`
+      + `radial-gradient(circle at 38% 34%, ${hi} 0%, transparent 35%),`
+      + `radial-gradient(ellipse at 45% 45%, ${mid} 20%, ${lo} 65%, ${dark} 100%)`;
   };
 
   // ============================================================
@@ -801,6 +802,7 @@
       const counterScale = this.vp.s < 0.6 ? 0.6 / this.vp.s : 1;
       this.$world.style.setProperty('--title-counter-scale', counterScale);
       if (this._starfield) this._starfield.setViewport(this.vp.x, this.vp.y);
+      this._updateNodePositions();
       this._renderMinimap();
     }
 
@@ -1749,10 +1751,13 @@
       const d = r * 2;
       this._positionNode(n, el);
       const depth = n.depth || 1;
-      // Depth affects brightness + slight blur for far nodes
-      const bright = 0.7 + depth * 0.35;
-      el.style.filter = `brightness(${bright.toFixed(2)})`;
-      el.style.opacity = (0.6 + depth * 0.4).toFixed(2);
+      // Far nodes: dimmer, slightly blurred; near nodes: vivid
+      const bright = 0.75 + depth * 0.3;
+      const blur = depth < 0.85 ? (0.85 - depth) * 3 : 0;
+      el.style.filter = blur > 0
+        ? `brightness(${bright.toFixed(2)}) blur(${blur.toFixed(1)}px)`
+        : `brightness(${bright.toFixed(2)})`;
+      el.style.opacity = (0.55 + depth * 0.45).toFixed(2);
       el.style.setProperty('--node-color', n.color);
       el.style.width = d + 'px';
       // Planet body
@@ -1760,7 +1765,7 @@
       star.style.width = d + 'px';
       star.style.height = d + 'px';
       star.style.background = planetGrad(n.color);
-      star.style.boxShadow = `0 0 ${r}px ${n.color}30, 0 0 ${r * 2}px ${n.color}10, inset -${r * 0.35}px -${r * 0.25}px ${r * 0.5}px rgba(0,0,0,0.55), inset ${r * 0.1}px ${r * 0.1}px ${r * 0.25}px rgba(255,255,255,0.06)`;
+      star.style.boxShadow = `0 0 ${r * 0.5}px ${n.color}40, 0 0 ${r * 1.5}px ${n.color}15, inset -${r * 0.3}px -${r * 0.2}px ${r * 0.4}px rgba(0,0,0,0.6)`;
       // Title
       el.querySelector('.node-title').textContent = n.title || 'Untitled';
       // Reminder
@@ -1795,9 +1800,21 @@
 
     _positionNode(n, el) {
       const depth = n.depth || 1;
-      // Depth affects scale: closer nodes (depth>1) appear larger, farther nodes smaller
-      const depthScale = 0.7 + depth * 0.3;
-      el.style.transform = `translate(${n.x}px, ${n.y}px) scale(${depthScale.toFixed(3)})`;
+      const depthScale = 0.75 + depth * 0.3;
+      // Parallax: offset from viewport center based on depth
+      const vcx = (window.innerWidth / 2 - this.vp.x) / this.vp.s;
+      const vcy = (window.innerHeight / 2 - this.vp.y) / this.vp.s;
+      const pf = (depth - 1) * 0.12; // parallax factor: nearer=positive, farther=negative
+      const px = (n.x - vcx) * pf;
+      const py = (n.y - vcy) * pf;
+      el.style.transform = `translate(${(n.x + px).toFixed(1)}px, ${(n.y + py).toFixed(1)}px) scale(${depthScale.toFixed(3)})`;
+    }
+
+    _updateNodePositions() {
+      for (const n of this.store.data.nodes) {
+        const el = this.$nodes.querySelector(`[data-id="${n.id}"]`);
+        if (el) this._positionNode(n, el);
+      }
     }
 
     _renderLinks() {
