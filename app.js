@@ -1745,11 +1745,15 @@
       el.style.filter = depth !== 1 ? `brightness(${depth})` : '';
       el.style.setProperty('--node-color', n.color);
       const star = el.querySelector('.node-star');
+      const lc = this.store.linksOf(n.id).length;
+      // Star size scales with link count: 8px base, +3px per link, max 26px
+      const starSize = clamp(8 + lc * 3, 8, 26);
+      star.style.width = starSize + 'px';
+      star.style.height = starSize + 'px';
       star.style.background = n.color;
-      star.style.boxShadow = `0 0 10px ${n.color}90`;
+      star.style.boxShadow = `0 0 ${starSize}px ${n.color}90`;
       el.querySelector('.node-title').textContent = n.title || 'Untitled';
       el.querySelector('.node-preview').textContent = n.content ? n.content.slice(0, 50) : '';
-      const lc = this.store.linksOf(n.id).length;
       const badge = el.querySelector('.node-link-badge');
       badge.textContent = lc;
       el.classList.toggle('has-links', lc > 0);
@@ -1784,8 +1788,7 @@
     }
 
     _positionNode(n, el) {
-      const s = this._calcNodeScale(n);
-      el.style.transform = `translate(${n.x}px, ${n.y}px) scale(${s})`;
+      el.style.transform = `translate(${n.x}px, ${n.y}px)`;
     }
 
     _renderLinks() {
