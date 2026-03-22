@@ -1799,6 +1799,7 @@
         this.$svg.removeChild(this.$svg.lastChild);
       }
 
+      console.log('[Conste] renderLinks:', this.store.data.links.length, 'links, svg:', this.$svg.tagName, this.$svg.childNodes.length);
       for (const lk of this.store.data.links) {
         const a = this.store.getNode(lk.s);
         const b = this.store.getNode(lk.t);
@@ -1806,6 +1807,7 @@
 
         const x1 = a.x + this._getNodeWidth(a) / 2, y1 = a.y + 12;
         const x2 = b.x + this._getNodeWidth(b) / 2, y2 = b.y + 12;
+        console.log('[Conste] link', lk.s, '->', lk.t, 'at', x1, y1, '->', x2, y2);
 
         // Glow line
         const glow = document.createElementNS(ns, 'line');
@@ -1813,8 +1815,8 @@
         glow.setAttribute('x2', x2); glow.setAttribute('y2', y2);
         glow.setAttribute('class', 'connection-glow');
         glow.setAttribute('stroke', a.color);
-        glow.setAttribute('stroke-opacity', '0.12');
-        glow.setAttribute('stroke-width', '6');
+        glow.setAttribute('stroke-opacity', '0.18');
+        glow.setAttribute('stroke-width', '8');
         this.$svg.appendChild(glow);
 
         // Main line
@@ -1823,8 +1825,8 @@
         line.setAttribute('x2', x2); line.setAttribute('y2', y2);
         line.setAttribute('class', 'connection-line');
         line.setAttribute('stroke', a.color);
-        line.setAttribute('stroke-opacity', '0.4');
-        line.setAttribute('stroke-width', '1.2');
+        line.setAttribute('stroke-opacity', '0.6');
+        line.setAttribute('stroke-width', '1.5');
         line.dataset.s = lk.s;
         line.dataset.t = lk.t;
         this.$svg.appendChild(line);
