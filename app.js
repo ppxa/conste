@@ -14,6 +14,10 @@
   const NODE_W_DEFAULT = 140; // fallback for nodes not yet measured
   const MIN_SCALE = 0.25;
   const MAX_SCALE = 3;
+  const TILT_MAX_DEG = 2.5;
+  const TILT_SENSITIVITY = 0.035;
+  const TILT_EASE = 0.08;
+  const TILT_PERSPECTIVE = 1200;
 
   // --- Util ---
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -107,11 +111,11 @@
         const layer = i < count * 0.6 ? 0 : i < count * 0.85 ? 1 : 2;
         const r = layer === 0 ? Math.random() * 0.8 + 0.2
                 : layer === 1 ? Math.random() * 1.0 + 0.5
-                : Math.random() * 1.5 + 0.8;
-        const a = layer === 0 ? Math.random() * 0.3 + 0.08
+                : Math.random() * 1.8 + 0.8;
+        const a = layer === 0 ? Math.random() * 0.25 + 0.05
                 : layer === 1 ? Math.random() * 0.4 + 0.15
                 : Math.random() * 0.5 + 0.2;
-        const pf = layer === 0 ? 0.02 : layer === 1 ? 0.05 : 0.1;
+        const pf = layer === 0 ? 0.01 : layer === 1 ? 0.06 : 0.18;
         this.stars.push({
           x: Math.random() * this.w * 1.4 - this.w * 0.2,
           y: Math.random() * this.h * 1.4 - this.h * 0.2,
@@ -422,6 +426,11 @@
       this.overlapTarget = null;
       this.editorNodeId = null;
       this._lastTouchTime = 0;  // guard against synthetic mouse events
+      this._lastPanPos = null;
+      this._reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!this._reducedMotion) {
+        this._tilt = { rx: 0, ry: 0, targetRx: 0, targetRy: 0 };
+      }
       this._undoStack = [];
       this._redoStack = [];
       this._longPressTimer = null;
@@ -480,6 +489,7 @@
 
       this._starfield = new StarField(document.getElementById('starfield'));
       this._startReminderCheck();
+      if (this._tilt) this._startTiltLoop();
     }
 
     // --- SVG Defs ---
@@ -510,7 +520,8 @@
       const linkFactor = Math.min(linkCount * 0.08, 0.5);
       // Content factor: 0 chars = 0, scales up to 0.3 for 500+ chars
       const contentFactor = Math.min(contentLen / 1500, 0.3);
-      return 1 + linkFactor + contentFactor;
+      const depth = n.depth || 1;
+      return (1 + linkFactor + contentFactor) * depth;
     }
 
     // --- Events ---
@@ -607,6 +618,8 @@
         };
         this.dragging = null;
         this.panning = null;
+        if (this._tilt) { this._tilt.targetRx = 0; this._tilt.targetRy = 0; }
+        this._lastPanPos = null;
         return;
       }
       if (e.touches.length !== 1) return;
@@ -638,7 +651,11 @@
     }
 
     _onTouchEnd(e) {
-      if (this.pinching) { this.pinching = null; return; }
+      if (this.pinching) {
+        this.pinching = null;
+        if (this._tilt) { this._tilt.targetRx = 0; this._tilt.targetRy = 0; }
+        return;
+      }
       this._onPointerUp();
     }
 
@@ -685,6 +702,13 @@
       } else if (this.panning && this.touchInfo.moved) {
         this.vp.x = this.panning.vpx + (px - this.panning.tx);
         this.vp.y = this.panning.vpy + (py - this.panning.ty);
+        if (this._tilt && this._lastPanPos) {
+          const vx = px - this._lastPanPos.x;
+          const vy = py - this._lastPanPos.y;
+          this._tilt.targetRy = clamp(-vx * TILT_SENSITIVITY, -TILT_MAX_DEG, TILT_MAX_DEG);
+          this._tilt.targetRx = clamp(vy * TILT_SENSITIVITY, -TILT_MAX_DEG, TILT_MAX_DEG);
+        }
+        this._lastPanPos = { x: px, y: py };
         this._applyVP();
       }
     }
@@ -734,6 +758,8 @@
         }
       }
 
+      if (this._tilt) { this._tilt.targetRx = 0; this._tilt.targetRy = 0; }
+      this._lastPanPos = null;
       this.dragging = null;
       this.panning = null;
       this.touchInfo = null;
@@ -756,12 +782,34 @@
 
     // --- Viewport ---
     _applyVP() {
-      this.$world.style.transform = `translate(${this.vp.x}px,${this.vp.y}px) scale(${this.vp.s})`;
+      const t = this._tilt;
+      if (t && (t.rx !== 0 || t.ry !== 0)) {
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        this.$world.style.transform =
+          `translate(${cx}px,${cy}px) perspective(${TILT_PERSPECTIVE}px) rotateX(${t.rx}deg) rotateY(${t.ry}deg) translate(${-cx}px,${-cy}px) translate(${this.vp.x}px,${this.vp.y}px) scale(${this.vp.s})`;
+      } else {
+        this.$world.style.transform = `translate(${this.vp.x}px,${this.vp.y}px) scale(${this.vp.s})`;
+      }
       // Counter-scale for title readability at zoom out
       const counterScale = this.vp.s < 0.6 ? 0.6 / this.vp.s : 1;
       this.$world.style.setProperty('--title-counter-scale', counterScale);
       if (this._starfield) this._starfield.setViewport(this.vp.x, this.vp.y);
       this._renderMinimap();
+    }
+
+    _startTiltLoop() {
+      const step = () => {
+        const t = this._tilt;
+        const prevRx = t.rx, prevRy = t.ry;
+        t.rx += (t.targetRx - t.rx) * TILT_EASE;
+        t.ry += (t.targetRy - t.ry) * TILT_EASE;
+        if (Math.abs(t.rx) < 0.01 && t.targetRx === 0) t.rx = 0;
+        if (Math.abs(t.ry) < 0.01 && t.targetRy === 0) t.ry = 0;
+        if (t.rx !== prevRx || t.ry !== prevRy) this._applyVP();
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
     }
 
     _centerViewport() {
@@ -850,6 +898,7 @@
         id: uid(), x, y,
         title: '', content: '',
         color: pick(COLORS),
+        depth: 0.9 + Math.random() * 0.2,
         createdAt: Date.now(), updatedAt: Date.now(),
       });
       this._render();
@@ -1690,6 +1739,8 @@
 
     _updateNodeEl(n, el) {
       this._positionNode(n, el);
+      const depth = n.depth || 1;
+      el.style.filter = depth !== 1 ? `brightness(${depth})` : '';
       el.style.setProperty('--node-color', n.color);
       const star = el.querySelector('.node-star');
       star.style.background = n.color;

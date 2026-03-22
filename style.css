@@ -111,6 +111,7 @@ input, textarea {
   top: 0;
   left: 0;
   transform-origin: 0 0;
+  transform-style: preserve-3d;
   will-change: transform;
 }
 
